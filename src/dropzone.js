@@ -1274,6 +1274,49 @@ export default class Dropzone extends Emitter {
           this._uploadData(files, [dataBlock]);
         };
 
+        const handleNextChunks = () => {
+          console.log('handleNextChunks')
+
+          if (this.options.parallelChunkUploads) {
+            // We can't upload all chunks at once
+            // if too much requests send to server at once, will be reached to server limit or crash the server
+            // Limit the number of requests by `parallelChunkUploads` or `parallelUploads` options.
+
+            // Example:
+            // - if `parallelChunkUploads` is 10, then only 10 chunks upload requests will be sending to server at once.
+            // - New chunk upload request only sending on current chunk upload requests less than 10.
+
+            const maxParallelRequests = Math.min(
+                this.options.parallelChunkUploads === true ? this.options.parallelUploads : this.options.parallelChunkUploads,
+                file.upload.totalChunkCount
+            );
+
+            let currentUploadingChunks = file.upload.chunks.filter(chunk => chunk.status === Dropzone.UPLOADING).length;
+
+            let freeRequest = maxParallelRequests - currentUploadingChunks;
+
+            console.log('parallelChunkUploads.0', {
+                maxParallelRequests,
+                currentUploadingChunks,
+                freeRequest,
+            })
+
+            for (let i = 0; freeRequest > 0; i++) {
+              handleNextChunk();
+              currentUploadingChunks++;
+              freeRequest--;
+
+              console.log('parallelChunkUploads', {
+                maxParallelRequests,
+                currentUploadingChunks,
+                freeRequest,
+              })
+            }
+          } else  {
+            handleNextChunk();
+          }
+        }
+
         file.upload.finishedChunkUpload = (chunk, response) => {
           let allFinished = true;
           chunk.status = Dropzone.SUCCESS;
@@ -1287,7 +1330,7 @@ export default class Dropzone extends Emitter {
 
           for (let i = 0; i < file.upload.totalChunkCount; i++) {
             if (file.upload.chunks[i] === undefined) {
-              return handleNextChunk();
+              return handleNextChunks();
             }
             if (file.upload.chunks[i].status !== Dropzone.SUCCESS) {
               allFinished = false;
@@ -1301,13 +1344,7 @@ export default class Dropzone extends Emitter {
           }
         };
 
-        if (this.options.parallelChunkUploads) {
-          for (let i = 0; i < file.upload.totalChunkCount; i++) {
-            handleNextChunk();
-          }
-        } else {
-          handleNextChunk();
-        }
+        handleNextChunks(file);
       } else {
         let dataBlocks = [];
         for (let i = 0; i < files.length; i++) {
